@@ -629,16 +629,34 @@ archive_kind() {
 }
 
 # Read archive members into a file; returns non-zero for corrupt archives.
+# Optional 4th arg: file to write uncompressed total KB (GNU tar --totals).
 archive_list_to() {
-  local archive="$1" out="$2" kind="$3"
+  local archive="$1" out="$2" kind="$3" totals_out="${4:-}"
+  local -a cmd
   case "$kind" in
-    gz)    tar -tzf "$archive" > "$out" 2>/dev/null ;;
-    zst)   tar -I zstd -tf "$archive" > "$out" 2>/dev/null ;;
-    xz)    tar -tJf "$archive" > "$out" 2>/dev/null ;;
-    bz2)   tar -tjf "$archive" > "$out" 2>/dev/null ;;
-    plain) tar -tf "$archive" > "$out" 2>/dev/null ;;
+    gz)    cmd=(tar -tzf "$archive") ;;
+    zst)   cmd=(tar -I zstd -tf "$archive") ;;
+    xz)    cmd=(tar -tJf "$archive") ;;
+    bz2)   cmd=(tar -tjf "$archive") ;;
+    plain) cmd=(tar -tf "$archive") ;;
     *) return 1 ;;
   esac
+  if [[ -n "$totals_out" ]]; then
+    local tmp_err rc=0
+    tmp_err="$(mktemp "${TMPDIR:-/tmp}/vmctl-tarerr.XXXXXX")" || return 1
+    if "${cmd[@]}" --totals > "$out" 2> "$tmp_err"; then
+      awk '/Total bytes (read|written):/ {for(i=1;i<=NF;i++) if($i=="read:"||$i=="written:") {gsub(/[^0-9]/,"",$(i+1)); print int($(i+1)/1024); found=1; exit}} END{if(!found) print 0}' "$tmp_err" > "$totals_out"
+      rm -f -- "$tmp_err"
+      return 0
+    fi
+    rc=$?
+    rm -f -- "$tmp_err"
+    # Retry without --totals (old/non-GNU tar); totals unknown.
+    printf '0\n' > "$totals_out"
+    "${cmd[@]}" > "$out" 2>/dev/null
+    return $?
+  fi
+  "${cmd[@]}" > "$out" 2>/dev/null
 }
 
 # Total uncompressed payload size in KB (best-effort, used for progress/ETA).
@@ -939,23 +957,28 @@ action_import() {
     return
   fi
 
-  # Read the member list once (large archives are slow to decompress repeatedly).
-  local list; list="$(mktemp "${TMPDIR:-/tmp}/vmctl-import.XXXXXX")" || die "Cannot create a temp file."
-  if ! archive_list_to "$archive" "$list" "$kind"; then
-    rm -f -- "$list"
+  info "Reading archive index (large archives may take a moment)..."
+  # Read member list and uncompressed total in one pass (avoids long silent pause).
+  local list totals_file total_kb
+  list="$(mktemp "${TMPDIR:-/tmp}/vmctl-import.XXXXXX")" || die "Cannot create a temp file."
+  totals_file="$(mktemp "${TMPDIR:-/tmp}/vmctl-import-totals.XXXXXX")" || { rm -f -- "$list"; die "Cannot create a temp file."; }
+  if ! archive_list_to "$archive" "$list" "$kind" "$totals_file"; then
+    rm -f -- "$list" "$totals_file"
     warn "Not a valid or supported archive: $(pretty_path "$archive")"
     return
   fi
+  total_kb="$(cat -- "$totals_file" 2>/dev/null)"; [[ "$total_kb" =~ ^[0-9]+$ ]] || total_kb=0
+  rm -f -- "$totals_file"
 
   local rc=0
-  _import_from_list "$archive" "$list" "$kind" || rc=$?
+  _import_from_list "$archive" "$list" "$kind" "$total_kb" || rc=$?
   rm -f -- "$list"
   return "$rc"
 }
 
 # Internal: do the import using an already-read member list.
 _import_from_list() {
-  local archive="$1" list="$2" kind="${3:-gz}"
+  local archive="$1" list="$2" kind="${3:-gz}" total_kb_in="${4:-0}"
   local unsafe top
   unsafe="$(awk '/^\// || /(^|\/)\.\.(\/|$)/ { print; exit }' "$list")"
   if [[ -n "$unsafe" ]]; then
@@ -991,7 +1014,11 @@ _import_from_list() {
 
   local arch_kb total_kb
   arch_kb="$(du -sk "$archive" 2>/dev/null | awk '{print $1}')"; arch_kb="${arch_kb:-0}"
-  total_kb="$(archive_total_kb "$archive" "$kind")"; [[ "$total_kb" =~ ^[0-9]+$ ]] || total_kb=0
+  if [[ "$total_kb_in" =~ ^[0-9]+$ ]] && (( total_kb_in > 0 )); then
+    total_kb="$total_kb_in"
+  else
+    total_kb="$(archive_total_kb "$archive" "$kind")"; [[ "$total_kb" =~ ^[0-9]+$ ]] || total_kb=0
+  fi
   # Space: prefer real uncompressed size when known, else compressed * 2.
   local need_kb="$(( arch_kb * 2 + 1024 ))"
   (( total_kb > 0 )) && need_kb="$(( total_kb + arch_kb + 1024 ))"

@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# vmctl - simple QEMU VM manager
+# https://github.com/okhtaymp/vmctl
+
+# --- Resolve script directory (works with symlinks) ---
+SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SOURCE" ]; do
+  DIR_RESOLVED="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ "$SOURCE" != /* ]] && SOURCE="$DIR_RESOLVED/$SOURCE"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+
+# --- Load base helpers first (path helpers are needed below) ---
+# shellcheck source=lib/utils.sh
+source "$SCRIPT_DIR/lib/utils.sh"
+
+# --- Globals ---
+DIR="$(to_abs_path "${VMCTL_HOME:-$PWD}")"                    # workspace
+VMS_DIR="$(to_abs_path "${VMCTL_VMS_DIR:-$DIR/vms}")"         # default VM root
+STATE_DIR="$DIR/.vmctl"                                        # registry/state
+REGISTRY="$STATE_DIR/vms.list"                                 # name <TAB> path
+SPICE_TOOLS_ISO="${VMCTL_SPICE_ISO:-$DIR/win7-spice-tools.iso}"
+SPICE_PORT_ENV_SET=${SPICE_PORT+1}
+SPICE_PORT="${SPICE_PORT:-5900}"
+
+# Private files by default: VM disks may contain sensitive data.
+umask "${VMCTL_UMASK:-077}" 2>/dev/null || umask 077
+
+# --- Load modules ---
+# shellcheck source=lib/registry.sh
+source "$SCRIPT_DIR/lib/registry.sh"
+# shellcheck source=lib/permissions.sh
+source "$SCRIPT_DIR/lib/permissions.sh"
+# shellcheck source=lib/checks.sh
+source "$SCRIPT_DIR/lib/checks.sh"
+# shellcheck source=lib/os-list.sh
+source "$SCRIPT_DIR/lib/os-list.sh"
+# shellcheck source=lib/ports.sh
+source "$SCRIPT_DIR/lib/ports.sh"
+# shellcheck source=lib/bootstrap.sh
+source "$SCRIPT_DIR/lib/bootstrap.sh"
+# shellcheck source=lib/settings.sh
+source "$SCRIPT_DIR/lib/settings.sh"
+# shellcheck source=lib/vm.sh
+source "$SCRIPT_DIR/lib/vm.sh"
+
+# --- Main loop ---
+main() {
+  check_requirements
+  ensure_vms_dir
+  registry_init || warn "Cannot create state folder: $STATE_DIR"
+  settings_load
+  check_permissions
+  detect_accel
+
+  while true; do
+    local choice dir
+    choice="$(pick_main_menu)"
+    case "$choice" in
+      "＋ New VM") action_new ;;
+      "⇩ Import VM") action_import ;;
+      "⚙ Permissions check") action_permissions ;;
+      "⚙ Settings") action_settings ;;
+      "") exit 0 ;;
+      *)
+        dir="$(find_vm_dir "$choice" 2>/dev/null || true)"
+        if [[ -n "$dir" ]]; then
+          vm_menu "$choice"
+        else
+          warn "Unknown selection: $choice"
+        fi
+        ;;
+    esac
+  done
+}
+
+main "$@"

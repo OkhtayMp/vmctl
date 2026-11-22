@@ -1,0 +1,26 @@
+# VM runtime data
+*.qcow2
+*.iso
+*.img
+vms/
+.vmctl/
+
+
+# Local/runtime files
+shared/
+proxy.pac
+restore-win7.cmd
+set-win10.cmd
+run.cmd
+run.sh
+*.vmctl.tar.gz
+*.vmctl.tar.zst
+*.part
+
+# OS/editor junk
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/

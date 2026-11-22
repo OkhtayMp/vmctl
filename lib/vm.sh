@@ -630,6 +630,7 @@ archive_kind() {
 
 # Read archive members into a file; returns non-zero for corrupt archives.
 # Optional 4th arg: file to write uncompressed total KB (GNU tar --totals).
+# Shows a live progress bar on stderr when reading large archives on a TTY.
 archive_list_to() {
   local archive="$1" out="$2" kind="$3" totals_out="${4:-}"
   local -a cmd
@@ -641,9 +642,76 @@ archive_list_to() {
     plain) cmd=(tar -tf "$archive") ;;
     *) return 1 ;;
   esac
+
   if [[ -n "$totals_out" ]]; then
     local tmp_err rc=0
     tmp_err="$(mktemp "${TMPDIR:-/tmp}/vmctl-tarerr.XXXXXX")" || return 1
+
+    # Progress bar based on compressed bytes read (Linux /proc/<pid>/io).
+    local arch_bytes show_progress=0
+    arch_bytes="$(stat -c '%s' -- "$archive" 2>/dev/null || stat -f '%z' -- "$archive" 2>/dev/null || echo 0)"
+    [[ "$arch_bytes" =~ ^[0-9]+$ ]] || arch_bytes=0
+    if [[ -t 2 && -d /proc && "$arch_bytes" -gt 0 ]]; then
+      show_progress=1
+    fi
+
+    if (( show_progress )); then
+      "${cmd[@]}" --totals > "$out" 2> "$tmp_err" &
+      local tar_pid=$! read_bytes=0 pct=0
+      local now_ms=0 last_ms=0 last_bytes=0 rate_bps=0 eta_ms=-1
+      local unit=M scale=$((1024*1024))
+      (( arch_bytes >= 1073741824 )) && { unit=G; scale=1073741824; }
+      while kill -0 "$tar_pid" 2>/dev/null; do
+        read_bytes=0
+        local _p _rb
+        for _p in "$tar_pid" $(ps -o pid= --ppid "$tar_pid" 2>/dev/null); do
+          _rb="$(awk '/^read_bytes:/ {print $2; exit}' "/proc/$_p/io" 2>/dev/null)"
+          [[ "$_rb" =~ ^[0-9]+$ ]] && read_bytes=$(( read_bytes + _rb ))
+        done
+        (( read_bytes > arch_bytes )) && read_bytes="$arch_bytes"
+        now_ms="$(date +%s%3N 2>/dev/null)"; [[ "$now_ms" =~ ^[0-9]+$ ]] || now_ms=$(( $(date +%s) * 1000 ))
+        if (( last_ms > 0 )); then
+          local dt=$(( now_ms - last_ms ))
+          if (( dt >= 400 )); then
+            local db=$(( read_bytes - last_bytes ))
+            (( db < 0 )) && db=0
+            rate_bps=$(( db * 1000 / dt ))
+            last_ms="$now_ms"; last_bytes="$read_bytes"
+          fi
+        else
+          last_ms="$now_ms"; last_bytes="$read_bytes"
+        fi
+        if (( rate_bps > 0 )); then eta_ms=$(( (arch_bytes - read_bytes) * 1000 / rate_bps ))
+        else eta_ms=-1; fi
+        pct=$(( read_bytes * 100 / arch_bytes )); (( pct > 99 )) && pct=99
+        local sp=$(( rate_bps / 1048576 ))
+        local n=$(( pct * 20 / 100 )) e=$(( 20 - n ))
+        local b s dn tn etas
+        b="$(printf '%*s' "$n" '' | tr ' ' '#')"; s="$(printf '%*s' "$e" '' | tr ' ' '-')"
+        dn=$(( read_bytes * 10 / scale )); tn=$(( arch_bytes * 10 / scale ))
+        if (( eta_ms < 0 )); then etas="--:--"
+        elif (( eta_ms < 3600000 )); then etas="$(printf '%02d:%02d' $(( eta_ms / 60000 )) $(( eta_ms % 60000 / 1000 )))"
+        else etas="$(printf '%d:%02d:%02d' $(( eta_ms / 3600000 )) $(( eta_ms % 3600000 / 60000 )) $(( eta_ms % 60000 / 1000 )))"; fi
+        printf '\r  [%s%s] %3d%%  %d.%d/%d.%d%s  %d MB/s  ETA %s ' "$b" "$s" "$pct" "$((dn/10))" "$((dn%10))" "$((tn/10))" "$((tn%10))" "$unit" "$sp" "$etas" >&2
+        sleep 0.2
+      done
+      wait "$tar_pid" || rc=$?
+      if (( rc == 0 )); then
+        local dn tn
+        dn=$(( arch_bytes * 10 / scale )); tn="$dn"
+        printf '\r  [####################] 100%%  %d.%d/%d.%d%s  done            \n' "$((dn/10))" "$((dn%10))" "$((tn/10))" "$((tn%10))" "$unit" >&2
+        awk '/Total bytes (read|written):/ {for(i=1;i<=NF;i++) if($i=="read:"||$i=="written:") {gsub(/[^0-9]/,"",$(i+1)); print int($(i+1)/1024); found=1; exit}} END{if(!found) print 0}' "$tmp_err" > "$totals_out"
+        rm -f -- "$tmp_err"
+        return 0
+      fi
+      printf '\n' >&2
+      rm -f -- "$tmp_err"
+      # Retry without --totals
+      printf '0\n' > "$totals_out"
+      "${cmd[@]}" > "$out" 2>/dev/null
+      return $?
+    fi
+
     if "${cmd[@]}" --totals > "$out" 2> "$tmp_err"; then
       awk '/Total bytes (read|written):/ {for(i=1;i<=NF;i++) if($i=="read:"||$i=="written:") {gsub(/[^0-9]/,"",$(i+1)); print int($(i+1)/1024); found=1; exit}} END{if(!found) print 0}' "$tmp_err" > "$totals_out"
       rm -f -- "$tmp_err"
@@ -651,7 +719,6 @@ archive_list_to() {
     fi
     rc=$?
     rm -f -- "$tmp_err"
-    # Retry without --totals (old/non-GNU tar); totals unknown.
     printf '0\n' > "$totals_out"
     "${cmd[@]}" > "$out" 2>/dev/null
     return $?

@@ -685,8 +685,8 @@ archive_list_to() {
         else eta_ms=-1; fi
         pct=$(( read_bytes * 100 / arch_bytes )); (( pct > 99 )) && pct=99
         local sp=$(( rate_bps / 1048576 ))
-        local n=$(( pct * 20 / 100 )) e=$(( 20 - n ))
-        local b s dn tn etas
+        local n e b s dn tn etas
+        n=$(( pct * 20 / 100 )); e=$(( 20 - n ))
         b="$(printf '%*s' "$n" '' | tr ' ' '#')"; s="$(printf '%*s' "$e" '' | tr ' ' '-')"
         dn=$(( read_bytes * 10 / scale )); tn=$(( arch_bytes * 10 / scale ))
         if (( eta_ms < 0 )); then etas="--:--"

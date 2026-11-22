@@ -30,7 +30,6 @@ else
 fi
 
 info "Installing to $INSTALL_DIR ..."
-rm -rf "$INSTALL_DIR"
 mkdir -p "$INSTALL_DIR" "$BIN_DIR"
 tar -xzf "$archive" -C "$tmp"
 
@@ -38,6 +37,9 @@ tar -xzf "$archive" -C "$tmp"
 src_dir="$(find "$tmp" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
 [[ -n "$src_dir" ]] || die "Failed to extract archive."
 
+# Update-safe install: replace program files, preserve user data (vms/, .vmctl/, ISOs, etc.).
+rm -rf -- "$INSTALL_DIR/lib"
+rm -f -- "$INSTALL_DIR/vmctl"
 cp -R "$src_dir"/vmctl "$src_dir"/lib "$INSTALL_DIR/"
 chmod +x "$INSTALL_DIR/vmctl"
 ln -sfn "$INSTALL_DIR/vmctl" "$BIN_PATH"

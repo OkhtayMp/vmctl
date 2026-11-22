@@ -47,23 +47,23 @@ Or with `wget`:
 wget -qO- https://raw.githubusercontent.com/okhtaymp/vmctl/main/install.sh | bash
 ```
 
-The installer places files in `~/.local/share/vmctl` and links `vmctl` into `~/.local/bin`.
+The installer places program files in `~/.local/share/vmctl` and links `vmctl` into `~/.local/bin`. Re-running the installer updates the program and preserves user data (`vms/`, `.vmctl/`, ISOs, etc.).
 
 ## Usage
 
-Run inside the folder where you want VM data stored:
+Run from anywhere:
 
 ```bash
 vmctl
 ```
 
-`vmctl` creates/uses a `vms/` directory in the current working directory.
+By default, `vmctl` stores data in a stable workspace at `~/.local/share/vmctl` (or `${XDG_DATA_HOME:-$HOME/.local/share}/vmctl`). It creates `vms/` and `.vmctl/` there automatically.
 
 ### Main flow
 
 1. Select an existing VM, or choose **New VM**
 2. For a new VM, pick an OS suggestion (300 built-in, searchable) or type any custom name. In the picker: type to filter, **Tab** inserts the highlighted suggestion into the query (the menu stays open so you can keep editing or append text), **Enter** confirms, **Esc** cancels. Names are validated and must be unique (case-insensitive); duplicates must be renamed
-3. Choose the VM folder: press **Enter** for the default `vms/<name>/`, or type any folder (it must be empty or not exist)
+3. Choose the VM folder: press **Enter** for the default `<workspace>/vms/<name>/` (shown as a full path), or type any folder (it must be empty or not exist)
 4. Choose an action:
    - **Run** - boot the VM
    - **Install / Reinstall (from ISO)** - wipe disk and install from ISO
@@ -77,11 +77,21 @@ Use **Import VM** from the main menu to restore an exported archive.
 
 ### Storage paths
 
-- Default: `vms/<name>/` inside the workspace
-- Custom: any folder, chosen at creation/import time
-- Mappings are stored in `.vmctl/vms.list` as `name<TAB>absolute-path`
-- Default folders are also discovered by scanning `vms/`, so the registry is only required for custom paths
-- Environment overrides: `VMCTL_HOME` (workspace), `VMCTL_VMS_DIR` (default VM root), `VMCTL_UMASK` (default `077`)
+- **Default workspace:** `${XDG_DATA_HOME:-$HOME/.local/share}/vmctl`
+- **Default VM root:** `<workspace>/vms/`
+- **Default VM folder:** `<workspace>/vms/<name>/` (you can choose any other empty/new folder at creation or import)
+- **Registry:** `<workspace>/.vmctl/vms.list`, storing `name<TAB>absolute-path` for custom locations
+- Default folders inside `vms/` are also discovered by scan, so the registry is only required for custom paths
+
+Workspace resolution:
+1. `VMCTL_HOME`, if set
+2. Current directory, if it already looks like a vmctl workspace (`.vmctl/vms.list`, `.vmctl/settings.conf`, or an existing `vms/<vm>/`)
+3. `${XDG_DATA_HOME:-$HOME/.local/share}/vmctl`
+
+Environment overrides:
+- `VMCTL_HOME` - workspace/data directory (registry, settings, default `vms/`)
+- `VMCTL_VMS_DIR` - default VM root (overrides `<workspace>/vms`)
+- `VMCTL_UMASK` - default file mode mask (default `077`)
 
 Names are logical and global inside a workspace: two VMs cannot share a name, even with different folders or letter case.
 

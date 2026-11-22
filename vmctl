@@ -18,11 +18,42 @@ SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
 source "$SCRIPT_DIR/lib/utils.sh"
 
 # --- Globals ---
-DIR="$(to_abs_path "${VMCTL_HOME:-$PWD}")"                    # workspace
+# Workspace resolution (stable, cwd-independent by default):
+#   1) VMCTL_HOME, if set
+#   2) current directory, if it already looks like a vmctl workspace (backcompat)
+#   3) XDG data home: ~/.local/share/vmctl
+_vmctl_default_home() {
+  printf '%s/vmctl' "${XDG_DATA_HOME:-$HOME/.local/share}"
+}
+_vmctl_is_workspace() {
+  local d="$1"
+  [[ -f "$d/.vmctl/vms.list" || -f "$d/.vmctl/settings.conf" ]] && return 0
+  # Legacy workspace: a vms/ folder with at least one VM directory.
+  [[ -d "$d/vms" ]] && find "$d/vms" -mindepth 1 -maxdepth 1 -type d -print -quit 2>/dev/null | grep -q .
+}
+if [[ -n "${VMCTL_HOME:-}" ]]; then
+  DIR="$(to_abs_path "$VMCTL_HOME")"
+elif _vmctl_is_workspace "$PWD"; then
+  DIR="$(to_abs_path "$PWD")"
+else
+  DIR="$(to_abs_path "$(_vmctl_default_home)")"
+fi
+
 VMS_DIR="$(to_abs_path "${VMCTL_VMS_DIR:-$DIR/vms}")"         # default VM root
 STATE_DIR="$DIR/.vmctl"                                        # registry/state
 REGISTRY="$STATE_DIR/vms.list"                                 # name <TAB> path
-SPICE_TOOLS_ISO="${VMCTL_SPICE_ISO:-$DIR/win7-spice-tools.iso}"
+
+# SPICE tools ISO: explicit env > workspace > script dir (bundled/install dir)
+if [[ -n "${VMCTL_SPICE_ISO:-}" ]]; then
+  SPICE_TOOLS_ISO="$(to_abs_path "$VMCTL_SPICE_ISO")"
+elif [[ -f "$DIR/win7-spice-tools.iso" ]]; then
+  SPICE_TOOLS_ISO="$DIR/win7-spice-tools.iso"
+elif [[ -f "$SCRIPT_DIR/win7-spice-tools.iso" ]]; then
+  SPICE_TOOLS_ISO="$SCRIPT_DIR/win7-spice-tools.iso"
+else
+  SPICE_TOOLS_ISO="$DIR/win7-spice-tools.iso"
+fi
+
 SPICE_PORT_ENV_SET=${SPICE_PORT+1}
 SPICE_PORT="${SPICE_PORT:-5900}"
 

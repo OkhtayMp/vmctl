@@ -641,6 +641,33 @@ archive_list_to() {
   esac
 }
 
+# Total uncompressed payload size in KB (best-effort, used for progress/ETA).
+archive_total_kb() {
+  local archive="$1" kind="$2" bytes
+  bytes="$(
+    case "$kind" in
+      gz)    tar -tzvf "$archive" 2>/dev/null ;;
+      zst)   tar -I zstd -tvf "$archive" 2>/dev/null ;;
+      xz)    tar -tJvf "$archive" 2>/dev/null ;;
+      bz2)   tar -tjvf "$archive" 2>/dev/null ;;
+      plain) tar -tvf "$archive" 2>/dev/null ;;
+      *) return 1 ;;
+    esac | awk '
+      # GNU tar: -rw-r--r-- user/group SIZE date time name
+      # bsdtar:  -rw-r--r--  1 user group SIZE date time name
+      /^[^ ]/ {
+        s = $3 + 0
+        if ($3 ~ /^[0-9]+$/ && $4 ~ /^[0-9]{4}-|^[A-Za-z]{3}/) { sum += $3; next }
+        if ($5 ~ /^[0-9]+$/) { sum += $5; next }
+        if ($3 ~ /^[0-9]+$/) { sum += $3; next }
+      }
+      END { print sum + 0 }
+    '
+  )" || bytes=0
+  [[ "$bytes" =~ ^[0-9]+$ ]] || bytes=0
+  echo $(( bytes / 1024 ))
+}
+
 # Extract an archive into a folder (fallback for old tar without --no-same-owner).
 archive_extract_to() {
   local archive="$1" dir="$2" kind="$3"
@@ -654,6 +681,49 @@ archive_extract_to() {
     *) return 1 ;;
   esac
   "${cmd[@]}" --no-same-owner 2>/dev/null || "${cmd[@]}" 2>/dev/null
+}
+
+# GNU tar checkpoint action: renders a progress/ETA bar to stderr.
+# Env: VMCTL_TOTAL_KB, VMCTL_SCALE, VMCTL_UNIT, VMCTL_PROGRESS_FILE
+_tar_checkpoint_action() {
+  cat <<'SH'
+f=${VMCTL_PROGRESS_FILE:-/dev/null}; tf=${VMCTL_TOTAL_KB:-1}
+now=$(date +%s%N 2>/dev/null)
+case "$now" in ""|*[!0-9]*) now=$(( $(date +%s) * 1000 )) ;; *) now=$(( now / 1000000 )) ;; esac
+dkb=$(( TAR_CHECKPOINT * 10 ))
+mp=$(( dkb * 1000 / tf )); [ "$mp" -gt 999 ] && mp=999
+set -- $(cat "$f" 2>/dev/null)
+pmp=${1:-}; ats=${2:-0}; akb=${3:-0}; rate=${4:-0}
+case "$ats" in ""|*[!0-9]*) ats=0 ;; esac
+case "$akb" in ""|*[!0-9]*) akb=0 ;; esac
+case "$rate" in ""|*[!0-9]*) rate=0 ;; esac
+[ "$ats" -gt 0 ] || { ats=$now; akb=0; }
+if [ "$mp" != "$pmp" ]; then
+  el=$(( now - ats )); [ "$el" -lt 0 ] && el=0
+  if [ "$el" -ge 4000 ]; then
+    rate=$(( (dkb - akb) * 1000 / el )); [ "$rate" -lt 0 ] && rate=0
+    ats=$now; akb=$dkb; el=0
+  fi
+  printf "%s %s %s %s\n" "$mp" "$ats" "$akb" "$rate" > "$f"
+  p=$(( mp / 10 ))
+  if [ "$rate" -gt 0 ]; then
+    rem=$(( tf - dkb )); [ "$rem" -lt 0 ] && rem=0
+    eta=$(( rem * 1000 / rate ))
+  else
+    eta=-1
+  fi
+  if [ "$rate" -gt 0 ]; then sp=$(( rate / 1024 ))
+  elif [ "$el" -gt 0 ]; then sp=$(( (dkb - akb) * 1000 / el / 1024 ))
+  else sp=0; fi
+  n=$(( p * 20 / 100 )); e=$(( 20 - n ))
+  b=$(printf "%*s" "$n" "" | tr " " "#"); s=$(printf "%*s" "$e" "" | tr " " "-")
+  dn=$(( dkb * 10 / ${VMCTL_SCALE:-1024} )); tn=$(( tf * 10 / ${VMCTL_SCALE:-1024} ))
+  if [ "$eta" -lt 0 ]; then etas="--:--"
+  elif [ "$eta" -lt 3600000 ]; then etas=$(printf "%02d:%02d" $(( eta / 60000 )) $(( eta % 60000 / 1000 )))
+  else etas=$(printf "%d:%02d:%02d" $(( eta / 3600000 )) $(( eta % 3600000 / 60000 )) $(( eta % 60000 / 1000 ))); fi
+  printf "\r  [%s%s] %3d%%  %d.%d/%d.%d%s  %d MB/s  ETA %s " "$b" "$s" "$p" "$(( dn / 10 ))" "$(( dn % 10 ))" "$(( tn / 10 ))" "$(( tn % 10 ))" "${VMCTL_UNIT:-G}" "$sp" "$etas" >&2
+fi
+SH
 }
 
 action_export() {
@@ -809,42 +879,7 @@ action_export() {
   # flushing) shows up within a few seconds instead of lagging minutes behind.
   # Until the first window completes the ETA shows "--:--" instead of guessing.
   # State file: "<deci-percent> <anchor_ms> <anchor_kb> <rate_kb_per_s>"
-  local cp_action='f=${VMCTL_PROGRESS_FILE:-/dev/null}; tf=${VMCTL_TOTAL_KB:-1}
-now=$(date +%s%N 2>/dev/null)
-case "$now" in ""|*[!0-9]*) now=$(( $(date +%s) * 1000 )) ;; *) now=$(( now / 1000000 )) ;; esac
-dkb=$(( TAR_CHECKPOINT * 10 ))
-mp=$(( dkb * 1000 / tf )); [ "$mp" -gt 999 ] && mp=999
-set -- $(cat "$f" 2>/dev/null)
-pmp=${1:-}; ats=${2:-0}; akb=${3:-0}; rate=${4:-0}
-case "$ats" in ""|*[!0-9]*) ats=0 ;; esac
-case "$akb" in ""|*[!0-9]*) akb=0 ;; esac
-case "$rate" in ""|*[!0-9]*) rate=0 ;; esac
-[ "$ats" -gt 0 ] || { ats=$now; akb=0; }
-if [ "$mp" != "$pmp" ]; then
-  el=$(( now - ats )); [ "$el" -lt 0 ] && el=0
-  if [ "$el" -ge 4000 ]; then
-    rate=$(( (dkb - akb) * 1000 / el )); [ "$rate" -lt 0 ] && rate=0
-    ats=$now; akb=$dkb; el=0
-  fi
-  printf "%s %s %s %s\n" "$mp" "$ats" "$akb" "$rate" > "$f"
-  p=$(( mp / 10 ))
-  if [ "$rate" -gt 0 ]; then
-    rem=$(( tf - dkb )); [ "$rem" -lt 0 ] && rem=0
-    eta=$(( rem * 1000 / rate ))
-  else
-    eta=-1
-  fi
-  if [ "$rate" -gt 0 ]; then sp=$(( rate / 1024 ))
-  elif [ "$el" -gt 0 ]; then sp=$(( (dkb - akb) * 1000 / el / 1024 ))
-  else sp=0; fi
-  n=$(( p * 20 / 100 )); e=$(( 20 - n ))
-  b=$(printf "%*s" "$n" "" | tr " " "#"); s=$(printf "%*s" "$e" "" | tr " " "-")
-  dn=$(( dkb * 10 / ${VMCTL_SCALE:-1024} )); tn=$(( tf * 10 / ${VMCTL_SCALE:-1024} ))
-  if [ "$eta" -lt 0 ]; then etas="--:--"
-  elif [ "$eta" -lt 3600000 ]; then etas=$(printf "%02d:%02d" $(( eta / 60000 )) $(( eta % 60000 / 1000 )))
-  else etas=$(printf "%d:%02d:%02d" $(( eta / 3600000 )) $(( eta % 3600000 / 60000 )) $(( eta % 60000 / 1000 ))); fi
-  printf "\r  [%s%s] %3d%%  %d.%d/%d.%d%s  %d MB/s  ETA %s " "$b" "$s" "$p" "$(( dn / 10 ))" "$(( dn % 10 ))" "$(( tn / 10 ))" "$(( tn % 10 ))" "${VMCTL_UNIT:-G}" "$sp" "$etas" >&2
-fi'
+  local cp_action; cp_action="$(_tar_checkpoint_action)"
 
   local -a tar_args=(-C "$vm_dir/.." --exclude='*.log' --exclude='*.pid')
   local show_progress=0
@@ -954,17 +989,71 @@ _import_from_list() {
     break
   done
 
-  local arch_kb
+  local arch_kb total_kb
   arch_kb="$(du -sk "$archive" 2>/dev/null | awk '{print $1}')"; arch_kb="${arch_kb:-0}"
-  check_space "$(dirname "$dest")" "$(( arch_kb * 2 + 1024 ))" "import" || { warn "Cancelled."; return; }
+  total_kb="$(archive_total_kb "$archive" "$kind")"; [[ "$total_kb" =~ ^[0-9]+$ ]] || total_kb=0
+  # Space: prefer real uncompressed size when known, else compressed * 2.
+  local need_kb="$(( arch_kb * 2 + 1024 ))"
+  (( total_kb > 0 )) && need_kb="$(( total_kb + arch_kb + 1024 ))"
+  check_space "$(dirname "$dest")" "$need_kb" "import" || { warn "Cancelled."; return; }
+  if (( total_kb > 0 )); then
+    local comp_mb=$(( arch_kb / 1024 )) uncomp_mb=$(( total_kb / 1024 ))
+    info "Archive: $(pretty_path "$archive") (${comp_mb} MB compressed, ${uncomp_mb} MB uncompressed)"
+  else
+    info "Archive: $(pretty_path "$archive") ($(( arch_kb / 1024 )) MB compressed)"
+  fi
 
   local parent; parent="$(dirname "$dest")"
   local tmpdir; tmpdir="$(mktemp -d "$parent/.vmctl-import.XXXXXX")" || die "Cannot create temp folder in $parent"
+  trap "rm -rf -- '$tmpdir'" EXIT INT TERM
+  local prog="$tmpdir/.vmctl-progress"
   info "[1/3] Extracting archive..."
-  if ! archive_extract_to "$archive" "$tmpdir" "$kind"; then
+
+  local -a tar_cmd
+  case "$kind" in
+    gz)    tar_cmd=(tar -xzf "$archive" -C "$tmpdir") ;;
+    zst)   tar_cmd=(tar -I zstd -xf "$archive" -C "$tmpdir") ;;
+    xz)    tar_cmd=(tar -xJf "$archive" -C "$tmpdir") ;;
+    bz2)   tar_cmd=(tar -xjf "$archive" -C "$tmpdir") ;;
+    plain) tar_cmd=(tar -xf "$archive" -C "$tmpdir") ;;
+    *) rm -rf -- "$tmpdir"; die "Unsupported archive type: $kind" ;;
+  esac
+
+  local show_progress=0 tar_rc=0 unit=M scale=1024
+  if (( total_kb >= 1048576 )); then unit=G; scale=1048576; else unit=M; scale=1024; fi
+  if (( total_kb > 0 )) && [[ -t 2 ]] && tar --version 2>/dev/null | grep -q 'GNU tar'; then
+    show_progress=1
+    local cp_interval cp_action
+    cp_interval=$(( total_kb / 1000 )); (( cp_interval < 1 )) && cp_interval=1
+    cp_action="$(_tar_checkpoint_action)"
+    : > "$prog"
+    VMCTL_TOTAL_KB="$total_kb" VMCTL_SCALE="$scale" VMCTL_UNIT="$unit" \
+      VMCTL_PROGRESS_FILE="$prog" \
+      tar "${tar_cmd[@]}" --no-same-owner --checkpoint="$cp_interval" --checkpoint-action="exec=$cp_action" \
+      || tar_rc=$?
+    if (( tar_rc != 0 )); then
+      tar_rc=0
+      : > "$prog"
+      VMCTL_TOTAL_KB="$total_kb" VMCTL_SCALE="$scale" VMCTL_UNIT="$unit" \
+        VMCTL_PROGRESS_FILE="$prog" \
+        tar "${tar_cmd[@]}" --checkpoint="$cp_interval" --checkpoint-action="exec=$cp_action" \
+        || tar_rc=$?
+    fi
+  else
+    tar "${tar_cmd[@]}" --no-same-owner 2>/dev/null || tar "${tar_cmd[@]}" 2>/dev/null || tar_rc=$?
+  fi
+
+  if (( tar_rc != 0 )); then
+    (( show_progress )) && printf '\n' >&2
     rm -rf -- "$tmpdir"
     die "Extraction failed: $(pretty_path "$archive")"
   fi
+  if (( show_progress )); then
+    local t10=$(( total_kb * 10 / ${scale:-1024} ))
+    printf '\r  [####################] 100%%  %d.%d%s total\n' \
+      "$(( t10 / 10 ))" "$(( t10 % 10 ))" "${unit:-M}" >&2
+  fi
+  rm -f -- "$prog"
 
   local src=""
   if [[ -d "$tmpdir/$top" ]]; then
@@ -1010,6 +1099,7 @@ _import_from_list() {
   if [[ ! -f "$dest/disk.qcow2" ]]; then
     warn "No disk.qcow2 in this archive. Use Install / Reinstall to create one."
   fi
+  trap - EXIT INT TERM
 }
 
 action_delete() {

@@ -59,7 +59,7 @@ check_requirements() {
       ;;
     Darwin) ok_items+=("hvf") ;;
   esac
-  [[ -f "$SPICE_TOOLS_ISO" ]] && ok_items+=("spice-iso") || warns+=("spice-iso missing: $SPICE_TOOLS_ISO")
+  [[ -f "$SPICE_TOOLS_ISO" ]] && ok_items+=("spice-iso")
 
   if (( missing_req )); then die "Required dependencies missing. Install them and run again."; fi
   ok "Ready: ${ok_items[*]}"

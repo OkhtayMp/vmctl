@@ -23,7 +23,7 @@ if [[ -n "$SCRIPT_PATH" && -f "$SCRIPT_PATH" ]]; then
 fi
 
 tmp=""
-cleanup() { [[ -n "$tmp" ]] && rm -rf -- "$tmp"; }
+cleanup() { [[ -n "$tmp" ]] && rm -rf -- "$tmp" || true; }
 trap cleanup EXIT
 
 src_dir=""

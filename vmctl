@@ -27,9 +27,8 @@ _vmctl_default_home() {
 }
 _vmctl_is_workspace() {
   local d="$1"
-  [[ -f "$d/.vmctl/vms.list" || -f "$d/.vmctl/settings.conf" ]] && return 0
-  # Legacy workspace: a vms/ folder with at least one VM directory.
-  [[ -d "$d/vms" ]] && find "$d/vms" -mindepth 1 -maxdepth 1 -type d -print -quit 2>/dev/null | grep -q .
+  # Only treat cwd as workspace when vmctl state is explicitly present.
+  [[ -f "$d/.vmctl/vms.list" || -f "$d/.vmctl/settings.conf" ]]
 }
 if [[ -n "${VMCTL_HOME:-}" ]]; then
   DIR="$(to_abs_path "$VMCTL_HOME")"

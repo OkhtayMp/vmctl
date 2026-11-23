@@ -85,7 +85,7 @@ Use **Import VM** from the main menu to restore an exported archive.
 
 Workspace resolution:
 1. `VMCTL_HOME`, if set
-2. Current directory, if it already looks like a vmctl workspace (`.vmctl/vms.list`, `.vmctl/settings.conf`, or an existing `vms/<vm>/`)
+2. Current directory, if it already contains vmctl state (`.vmctl/vms.list` or `.vmctl/settings.conf`)
 3. `${XDG_DATA_HOME:-$HOME/.local/share}/vmctl`
 
 Environment overrides:

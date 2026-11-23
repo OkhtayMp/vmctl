@@ -47,7 +47,7 @@ Or with `wget`:
 wget -qO- https://raw.githubusercontent.com/okhtaymp/vmctl/main/install.sh | bash
 ```
 
-The installer places program files in `~/.local/share/vmctl` and links `vmctl` into `~/.local/bin`. Re-running the installer updates the program and preserves user data (`vms/`, `.vmctl/`, ISOs, etc.).
+The installer places program files in `~/.local/share/vmctl` and links `vmctl` into `~/.local/bin`. Re-running the installer updates the program and preserves user data (`vms/`, `.vmctl/`, ISOs, etc.). Running `./install.sh` from a local checkout installs that local version; running via `curl`/`wget` downloads the configured GitHub branch.
 
 ## Usage
 

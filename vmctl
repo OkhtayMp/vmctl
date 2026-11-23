@@ -42,15 +42,14 @@ VMS_DIR="$(to_abs_path "${VMCTL_VMS_DIR:-$DIR/vms}")"         # default VM root
 STATE_DIR="$DIR/.vmctl"                                        # registry/state
 REGISTRY="$STATE_DIR/vms.list"                                 # name <TAB> path
 
-# SPICE tools ISO: explicit env > workspace > script dir (bundled/install dir)
+# Optional SPICE guest tools ISO (only attached when explicitly provided/found).
+SPICE_TOOLS_ISO=""
 if [[ -n "${VMCTL_SPICE_ISO:-}" ]]; then
   SPICE_TOOLS_ISO="$(to_abs_path "$VMCTL_SPICE_ISO")"
-elif [[ -f "$DIR/win7-spice-tools.iso" ]]; then
-  SPICE_TOOLS_ISO="$DIR/win7-spice-tools.iso"
-elif [[ -f "$SCRIPT_DIR/win7-spice-tools.iso" ]]; then
-  SPICE_TOOLS_ISO="$SCRIPT_DIR/win7-spice-tools.iso"
-else
-  SPICE_TOOLS_ISO="$DIR/win7-spice-tools.iso"
+elif [[ -f "$DIR/spice-guest-tools.iso" ]]; then
+  SPICE_TOOLS_ISO="$DIR/spice-guest-tools.iso"
+elif [[ -f "$SCRIPT_DIR/spice-guest-tools.iso" ]]; then
+  SPICE_TOOLS_ISO="$SCRIPT_DIR/spice-guest-tools.iso"
 fi
 
 SPICE_PORT_ENV_SET=${SPICE_PORT+1}

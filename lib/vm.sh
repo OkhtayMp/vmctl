@@ -346,10 +346,6 @@ run_qemu() {
   if [[ -n "$boot_iso" ]]; then
     args+=( -drive "file=$boot_iso,media=cdrom,readonly=on" -boot once=d )
   fi
-  if [[ -f "$SPICE_TOOLS_ISO" ]]; then
-    args+=( -drive "file=$SPICE_TOOLS_ISO,media=cdrom,readonly=on" )
-  fi
-
   args+=(
     -nic "$nic"
     -device usb-tablet

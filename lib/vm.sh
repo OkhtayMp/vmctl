@@ -1101,11 +1101,11 @@ _import_from_list() {
 
   local -a tar_cmd
   case "$kind" in
-    gz)    tar_cmd=(tar -xzf "$archive" -C "$tmpdir") ;;
-    zst)   tar_cmd=(tar -I zstd -xf "$archive" -C "$tmpdir") ;;
-    xz)    tar_cmd=(tar -xJf "$archive" -C "$tmpdir") ;;
-    bz2)   tar_cmd=(tar -xjf "$archive" -C "$tmpdir") ;;
-    plain) tar_cmd=(tar -xf "$archive" -C "$tmpdir") ;;
+    gz)    tar_cmd=(-xzf "$archive" -C "$tmpdir") ;;
+    zst)   tar_cmd=(-I zstd -xf "$archive" -C "$tmpdir") ;;
+    xz)    tar_cmd=(-xJf "$archive" -C "$tmpdir") ;;
+    bz2)   tar_cmd=(-xjf "$archive" -C "$tmpdir") ;;
+    plain) tar_cmd=(-xf "$archive" -C "$tmpdir") ;;
     *) rm -rf -- "$tmpdir"; die "Unsupported archive type: $kind" ;;
   esac
 

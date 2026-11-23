@@ -1,14 +1,14 @@
 # vmctl
 
-Terminal VM manager for QEMU/KVM on Linux. Simple TUI, per-VM folders, safe import/export, and clear permission handling.
+`vmctl` is a lightweight QEMU/KVM virtual machine manager for Linux with a terminal UI. It helps you create, run, import, export, and manage VMs without manual QEMU command setup.
 
-## What it solves
+## Problems it solves
 
-- **Messy VM files**: keeps each VM in its own managed folder (disk, ports, bootstrap, settings).
-- **Path confusion**: uses a stable default workspace, supports custom VM folders, and respects `VMCTL_HOME`/`VMCTL_VMS_DIR`.
-- **Risky import/export**: exports/imports `.vmctl.tar.zst`/`.tar.gz` with progress/ETA, validates archive paths, extracts atomically, and never overwrites existing VMs.
-- **Permission issues**: creates private files by default and shows exact `chmod/chown` fixes when needed.
-- **Manual QEMU setup**: gives a simple menu for run/install/resize/ports/bootstrap/settings.
+- **Manual QEMU commands**: manage VM lifecycle from a simple TUI/menu.
+- **Disorganized VM files**: keep each VM in its own folder (disk, ports, bootstrap, settings).
+- **Unreliable VM transfer**: import/export VM archives (`.vmctl.tar.zst`, `.vmctl.tar.gz`) with progress, ETA, path validation, atomic extraction, and no overwrite on existing VM names.
+- **Path confusion**: stable default workspace with optional `VMCTL_HOME` / `VMCTL_VMS_DIR` overrides.
+- **Permission issues**: private defaults (`700` dirs, `600` files) and clear `chmod/chown` fix guidance.
 
 ## Install
 
@@ -16,11 +16,11 @@ Terminal VM manager for QEMU/KVM on Linux. Simple TUI, per-VM folders, safe impo
 # Local checkout
 ./install.sh
 
-# Or from GitHub
+# Or install from GitHub
 curl -fsSL https://raw.githubusercontent.com/okhtaymp/vmctl/main/install.sh | bash
 ```
 
-Installs to `~/.local/share/vmctl` and links `~/.local/bin/vmctl`. Reinstall/update is safe: user data (`vms/`, `.vmctl/`) is preserved.
+Installs to `~/.local/share/vmctl` and links `~/.local/bin/vmctl`. Updates are safe: user data (`vms/`, `.vmctl/`) is preserved.
 
 ## Usage
 
@@ -28,14 +28,14 @@ Installs to `~/.local/share/vmctl` and links `~/.local/bin/vmctl`. Reinstall/upd
 vmctl
 ```
 
-Main actions: **New VM**, **Import VM**, **Run**, **Install/Reinstall (ISO)**, **Resize disk**, **Port forwards**, **Bootstrap**, **VM Settings**, **Export VM**, **Delete VM**.
+Actions: **New VM**, **Import VM**, **Run**, **Install/Reinstall (ISO)**, **Resize disk**, **Port forwards**, **Bootstrap**, **VM Settings**, **Export VM**, **Delete VM**.
 
-## Defaults & Overrides
+## Defaults
 
 - Workspace: `${XDG_DATA_HOME:-$HOME/.local/share}/vmctl`
-- VM root: `<workspace>/vms` (or `VMCTL_VMS_DIR`)
-- Workspace resolution: `VMCTL_HOME` → cwd with vmctl state → XDG default
-- Permissions mask: `VMCTL_UMASK` (default `077`)
+- VM root: `<workspace>/vms` or `VMCTL_VMS_DIR`
+- Workspace resolution: `VMCTL_HOME` → current dir with vmctl state → XDG default
+- File mask: `VMCTL_UMASK` (default `077`)
 
 ## Requirements
 

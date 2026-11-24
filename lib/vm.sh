@@ -399,7 +399,7 @@ run_qemu() {
   if [[ $spice_rc -eq 0 ]]; then
     cleanup_bootstraps
     warn "SPICE port already in use: 127.0.0.1:${SPICE_PORT}"
-    port_in_use_details "127.0.0.1" "$SPICE_PORT" tcp | sed 's/^/  /' >&2
+    port_in_use_details "127.0.0.1" "$SPICE_PORT" tcp | sed 's/^/  /' >&2 || true
     die "Cannot start VM '$name': SPICE port 127.0.0.1:${SPICE_PORT} is already in use. Change the SPICE port in Settings or stop the conflicting process."
   fi
   if ! ports_preflight "$name"; then

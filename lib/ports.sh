@@ -117,7 +117,7 @@ port_in_use_details() {
   command -v ss >/dev/null 2>&1 || return 0
   local flag="-ltnp"
   [[ "$proto" == udp ]] && flag="-lunp"
-  ss $flag "sport = :$port" 2>/dev/null | awk 'NR>1 {print}' | head -n 3
+  ss $flag "sport = :$port" 2>/dev/null | awk 'NR>1 {print}' | head -n 3 || true
 }
 
 # Preflight: verify configured hostfwd ports can be bound.
@@ -145,7 +145,7 @@ ports_preflight() {
     if [[ $rc -eq 0 ]]; then
       warn "Host port already in use: ${proto} ${bind}:${hp} -> guest :${gp}"
       local details
-      details="$(port_in_use_details "$bind" "$hp" "$proto")"
+      details="$(port_in_use_details "$bind" "$hp" "$proto")" || details=""
       [[ -n "$details" ]] && echo "$details" | sed 's/^/  /' >&2
       echo "  Fix: stop the process using that port, or remove/change the forward in 'Port forwards'." >&2
       ok=1
@@ -183,7 +183,7 @@ ports_add() {
   port_in_use "$bind" "$hp" "$proto"; rc=$?
   if [[ $rc -eq 0 ]]; then
     warn "Host ${proto} ${bind}:${hp} is currently in use."
-    port_in_use_details "$bind" "$hp" "$proto" | sed 's/^/  /' >&2
+    port_in_use_details "$bind" "$hp" "$proto" | sed 's/^/  /' >&2 || true
     confirm "Add this forward anyway?" || return
   elif [[ $rc -eq 2 ]]; then
     warn "Cannot verify whether ${proto} ${bind}:${hp} is free (need python3 or ss)."

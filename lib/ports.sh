@@ -124,6 +124,21 @@ port_in_use_details() {
   ss $flag "sport = :$port" 2>/dev/null | awk 'NR>1 {print}' | head -n 3 || true
 }
 
+# Can the QEMU binary bind privileged ports even though this user cannot?
+# True when QEMU carries cap_net_bind_service (setcap) or low ports are
+# already allowed system-wide via net.ipv4.ip_unprivileged_port_start.
+qemu_can_bind_privileged() {
+  local hp="$1" bin start
+  (( EUID == 0 )) && return 0
+  start="$(sysctl -n net.ipv4.ip_unprivileged_port_start 2>/dev/null || true)"
+  [[ "$start" =~ ^[0-9]+$ ]] && (( hp >= start )) && return 0
+  bin="$(command -v qemu-system-x86_64 2>/dev/null || true)"
+  [[ -n "$bin" ]] || return 1
+  command -v getcap >/dev/null 2>&1 || return 1
+  getcap "$bin" 2>/dev/null | grep -q 'cap_net_bind_service' && return 0
+  return 1
+}
+
 # Preflight: verify configured hostfwd ports can be bound.
 # Prints errors and returns 1 if any conflict is found.
 ports_preflight() {
@@ -154,14 +169,19 @@ ports_preflight() {
       echo "  Fix: stop the process using that port, or remove/change the forward in 'Port forwards'." >&2
       ok=1
     elif [[ $rc -eq 3 ]]; then
-      warn "Host port cannot be bound: ${proto} ${bind}:${hp} -> guest :${gp}"
-      if (( hp < 1024 )); then
-        echo "  Reason: port $hp is privileged (<1024) and requires root/CAP_NET_BIND_SERVICE." >&2
+      if (( hp < 1024 )) && qemu_can_bind_privileged "$hp"; then
+        : # QEMU itself may bind this port (setcap or permissive sysctl).
       else
-        echo "  Reason: permission denied binding this port." >&2
+        warn "Host port cannot be bound: ${proto} ${bind}:${hp} -> guest :${gp}"
+        if (( hp < 1024 )); then
+          echo "  Reason: port $hp is privileged (<1024) and requires root/CAP_NET_BIND_SERVICE." >&2
+          echo "  One-time option (needs sudo): sudo setcap cap_net_bind_service=+ep $(command -v qemu-system-x86_64 || true)" >&2
+        else
+          echo "  Reason: permission denied binding this port." >&2
+        fi
+        echo "  Fix: use a host port >= 1024, or change/remove the forward in 'Port forwards'." >&2
+        ok=1
       fi
-      echo "  Fix: use a host port >= 1024, or change/remove the forward in 'Port forwards'." >&2
-      ok=1
     elif [[ $rc -eq 2 ]]; then
       warn "Cannot verify host port availability (need python3 or ss): ${proto} ${bind}:${hp}"
     fi
@@ -199,14 +219,19 @@ ports_add() {
     port_in_use_details "$bind" "$hp" "$proto" | sed 's/^/  /' >&2 || true
     confirm "Add this forward anyway?" || return
   elif [[ $rc -eq 3 ]]; then
-    warn "Host ${proto} ${bind}:${hp} cannot be bound by this user."
-    if (( hp < 1024 )); then
-      echo "  Reason: port $hp is privileged (<1024) and requires root/CAP_NET_BIND_SERVICE." >&2
+    if (( hp < 1024 )) && qemu_can_bind_privileged "$hp"; then
+      : # QEMU can bind it; allow without warning.
     else
-      echo "  Reason: permission denied binding this port." >&2
+      warn "Host ${proto} ${bind}:${hp} cannot be bound by this user."
+      if (( hp < 1024 )); then
+        echo "  Reason: port $hp is privileged (<1024) and requires root/CAP_NET_BIND_SERVICE." >&2
+        echo "  One-time option (needs sudo): sudo setcap cap_net_bind_service=+ep $(command -v qemu-system-x86_64 || true)" >&2
+      else
+        echo "  Reason: permission denied binding this port." >&2
+      fi
+      echo "  Fix: choose a host port >= 1024." >&2
+      return
     fi
-    echo "  Fix: choose a host port >= 1024." >&2
-    return
   elif [[ $rc -eq 2 ]]; then
     warn "Cannot verify whether ${proto} ${bind}:${hp} is free (need python3 or ss)."
   fi

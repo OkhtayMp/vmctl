@@ -394,8 +394,8 @@ run_qemu() {
   run_bootstraps "$name"
 
   # Preflight: fail early with a precise message for common port conflicts.
-  local spice_rc
-  port_in_use "127.0.0.1" "$SPICE_PORT" tcp; spice_rc=$?
+  local spice_rc=0
+  port_in_use "127.0.0.1" "$SPICE_PORT" tcp || spice_rc=$?
   if [[ $spice_rc -eq 0 ]]; then
     cleanup_bootstraps
     warn "SPICE port already in use: 127.0.0.1:${SPICE_PORT}"

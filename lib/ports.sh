@@ -63,7 +63,8 @@ ports_valid_port() { [[ "$1" =~ ^[0-9]+$ ]] && (( $1 >= 1 && $1 <= 65535 )); }
 port_in_use() {
   local bind="$1" port="$2" proto="${3:-tcp}"
   if command -v python3 >/dev/null 2>&1; then
-    python3 - "$bind" "$port" "$proto" <<'PY' >/dev/null 2>&1
+    local rc=0
+    python3 - "$bind" "$port" "$proto" <<'PY' >/dev/null 2>&1 || rc=$?
 import socket, sys
 bind, port, proto = sys.argv[1], int(sys.argv[2]), sys.argv[3].lower()
 family = socket.AF_INET6 if ':' in bind else socket.AF_INET
@@ -80,7 +81,6 @@ finally:
     s.close()
 sys.exit(1)
 PY
-    local rc=$?
     [[ $rc -eq 0 || $rc -eq 1 ]] && return "$rc"
   fi
   if command -v ss >/dev/null 2>&1; then
@@ -141,7 +141,7 @@ ports_preflight() {
       continue
     fi
     seen[$key]="${proto} ${bind}:${hp} -> ${gp}"
-    port_in_use "$bind" "$hp" "$proto"; rc=$?
+    rc=0; port_in_use "$bind" "$hp" "$proto" || rc=$?
     if [[ $rc -eq 0 ]]; then
       warn "Host port already in use: ${proto} ${bind}:${hp} -> guest :${gp}"
       local details
@@ -179,8 +179,8 @@ ports_add() {
     echo "  Remove/change the existing forward first." >&2
     return
   fi
-  local rc
-  port_in_use "$bind" "$hp" "$proto"; rc=$?
+  local rc=0
+  port_in_use "$bind" "$hp" "$proto" || rc=$?
   if [[ $rc -eq 0 ]]; then
     warn "Host ${proto} ${bind}:${hp} is currently in use."
     port_in_use_details "$bind" "$hp" "$proto" | sed 's/^/  /' >&2 || true

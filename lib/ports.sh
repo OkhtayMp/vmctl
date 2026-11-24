@@ -65,7 +65,7 @@ port_in_use() {
   if command -v python3 >/dev/null 2>&1; then
     local rc=0
     python3 - "$bind" "$port" "$proto" <<'PY' >/dev/null 2>&1 || rc=$?
-import socket, sys
+import errno, socket, sys
 bind, port, proto = sys.argv[1], int(sys.argv[2]), sys.argv[3].lower()
 family = socket.AF_INET6 if ':' in bind else socket.AF_INET
 stype = socket.SOCK_DGRAM if proto == 'udp' else socket.SOCK_STREAM
@@ -75,13 +75,17 @@ try:
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
     addr = (bind, port, 0, 0) if family == socket.AF_INET6 else (bind, port)
     s.bind(addr)
-except OSError:
+except PermissionError:
+    sys.exit(3)
+except OSError as e:
+    if e.errno in (errno.EACCES, errno.EPERM):
+        sys.exit(3)
     sys.exit(0)
 finally:
     s.close()
 sys.exit(1)
 PY
-    [[ $rc -eq 0 || $rc -eq 1 ]] && return "$rc"
+    [[ $rc -eq 0 || $rc -eq 1 || $rc -eq 3 ]] && return "$rc"
   fi
   if command -v ss >/dev/null 2>&1; then
     local flag="-ltnH"
@@ -149,6 +153,15 @@ ports_preflight() {
       [[ -n "$details" ]] && echo "$details" | sed 's/^/  /' >&2
       echo "  Fix: stop the process using that port, or remove/change the forward in 'Port forwards'." >&2
       ok=1
+    elif [[ $rc -eq 3 ]]; then
+      warn "Host port cannot be bound: ${proto} ${bind}:${hp} -> guest :${gp}"
+      if (( hp < 1024 )); then
+        echo "  Reason: port $hp is privileged (<1024) and requires root/CAP_NET_BIND_SERVICE." >&2
+      else
+        echo "  Reason: permission denied binding this port." >&2
+      fi
+      echo "  Fix: use a host port >= 1024, or change/remove the forward in 'Port forwards'." >&2
+      ok=1
     elif [[ $rc -eq 2 ]]; then
       warn "Cannot verify host port availability (need python3 or ss): ${proto} ${bind}:${hp}"
     fi
@@ -185,6 +198,15 @@ ports_add() {
     warn "Host ${proto} ${bind}:${hp} is currently in use."
     port_in_use_details "$bind" "$hp" "$proto" | sed 's/^/  /' >&2 || true
     confirm "Add this forward anyway?" || return
+  elif [[ $rc -eq 3 ]]; then
+    warn "Host ${proto} ${bind}:${hp} cannot be bound by this user."
+    if (( hp < 1024 )); then
+      echo "  Reason: port $hp is privileged (<1024) and requires root/CAP_NET_BIND_SERVICE." >&2
+    else
+      echo "  Reason: permission denied binding this port." >&2
+    fi
+    echo "  Fix: choose a host port >= 1024." >&2
+    return
   elif [[ $rc -eq 2 ]]; then
     warn "Cannot verify whether ${proto} ${bind}:${hp} is free (need python3 or ss)."
   fi

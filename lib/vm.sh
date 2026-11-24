@@ -393,16 +393,44 @@ run_qemu() {
 
   run_bootstraps "$name"
 
+  # Preflight: fail early with a precise message for common port conflicts.
+  local spice_rc
+  port_in_use "127.0.0.1" "$SPICE_PORT" tcp; spice_rc=$?
+  if [[ $spice_rc -eq 0 ]]; then
+    cleanup_bootstraps
+    warn "SPICE port already in use: 127.0.0.1:${SPICE_PORT}"
+    port_in_use_details "127.0.0.1" "$SPICE_PORT" tcp | sed 's/^/  /' >&2
+    die "Cannot start VM '$name': SPICE port 127.0.0.1:${SPICE_PORT} is already in use. Change the SPICE port in Settings or stop the conflicting process."
+  fi
+  if ! ports_preflight "$name"; then
+    cleanup_bootstraps
+    die "Cannot start VM '$name': one or more host forward ports are unavailable. Fix the conflicts above, then retry."
+  fi
+
+  local qemu_log
+  qemu_log="$(vm_dir_of "$name")/qemu-last.log"
+  : > "$qemu_log" 2>/dev/null || qemu_log="$(mktemp "${TMPDIR:-/tmp}/vmctl-qemu.XXXXXX.log")"
+
   if command -v remote-viewer >/dev/null 2>&1; then
     args+=( -display none )
     info "[2/3] Starting QEMU..."
-    qemu-system-x86_64 "${args[@]}" &
+    qemu-system-x86_64 "${args[@]}" >"$qemu_log" 2>&1 &
     local qemu_pid=$!
     cleanup() { kill "$qemu_pid" 2>/dev/null || true; cleanup_bootstraps; }
     trap cleanup EXIT INT TERM
     ok "QEMU started (pid $qemu_pid)"
     info "[3/3] Connecting viewer..."
-    wait_spice_port "$SPICE_PORT" "$qemu_pid" || { cleanup_bootstraps; die "QEMU exited before SPICE became ready."; }
+    if ! wait_spice_port "$SPICE_PORT" "$qemu_pid"; then
+      wait "$qemu_pid" 2>/dev/null || true
+      cleanup_bootstraps
+      warn "QEMU log: $qemu_log"
+      if [[ -s "$qemu_log" ]]; then
+        echo "${C_RED}--- QEMU output (last 40 lines) ---${C_RST}" >&2
+        tail -n 40 -- "$qemu_log" >&2
+        echo "${C_RED}--- end QEMU output ---${C_RST}" >&2
+      fi
+      die "QEMU exited before SPICE became ready. See QEMU output above for the exact cause."
+    fi
     remote-viewer "spice://127.0.0.1:${SPICE_PORT}" || true
     info "Viewer closed, shutting down..."
     kill "$qemu_pid" 2>/dev/null || true
@@ -415,7 +443,7 @@ run_qemu() {
     args+=( -display default )
     info "[3/3] SPICE available at spice://127.0.0.1:${SPICE_PORT}"
     trap cleanup_bootstraps EXIT INT TERM
-    qemu-system-x86_64 "${args[@]}" || true
+    qemu-system-x86_64 "${args[@]}" 2>&1 | tee "$qemu_log" || true
     cleanup_bootstraps
     trap - EXIT INT TERM
   fi

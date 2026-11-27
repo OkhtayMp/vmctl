@@ -71,8 +71,10 @@ family = socket.AF_INET6 if ':' in bind else socket.AF_INET
 stype = socket.SOCK_DGRAM if proto == 'udp' else socket.SOCK_STREAM
 s = socket.socket(family, stype)
 try:
+    # TCP: allow binding over sockets stuck in TIME_WAIT, like QEMU does.
+    # UDP: keep the strict check (no TIME_WAIT state exists).
     if proto != 'udp':
-        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     addr = (bind, port, 0, 0) if family == socket.AF_INET6 else (bind, port)
     s.bind(addr)
 except PermissionError:
